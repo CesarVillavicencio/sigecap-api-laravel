@@ -6,6 +6,10 @@ Route::name('test.')->prefix('test')->group(__DIR__.'/api/test.php');
 
 // Laravel agrega /api; las rutas de negocio quedan bajo /api/v1.
 Route::prefix('v1')->name('api.v1.')->group(function () {
+    Route::prefix('public')->name('public.')->group(function () {
+        Route::group([], __DIR__.'/api/public-courses.php');
+        Route::group([], __DIR__.'/api/public-course-editions.php');
+    });
     Route::prefix('health')->name('health.')->group(__DIR__.'/api/health.php');
     Route::prefix('dependencies')->name('dependencies.')->group(__DIR__.'/api/dependencies.php');
     Route::prefix('courses')->name('courses.')->group(__DIR__.'/api/courses.php');

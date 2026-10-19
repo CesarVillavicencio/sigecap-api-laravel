@@ -98,6 +98,16 @@ Cada fila enumera las cinco rutas reales de su recurso. `GET` de colección list
 | GET | `/constancias/verificar/{token}` | Verificación pública de constancia; actualmente responde `501 NOT_IMPLEMENTED` |
 | GET | `/health` | Salud pública; actualmente responde `501 NOT_IMPLEMENTED` |
 
+## Rutas publicas para el frontend Java bajo `/api/v1/public`
+
+| Metodo | Ruta | Resultado |
+| --- | --- | --- |
+| GET | `/api/v1/public/cursos` | Catalogo publico en JSON |
+| GET | `/api/v1/public/cursos/{id}` | Datos publicos del curso en JSON |
+| POST | `/api/v1/public/cursos/{id}/inscripciones` | Inscripcion a una edicion del curso |
+| GET | `/api/v1/public/c/{public_token}` | Datos publicos de la edicion en JSON |
+| POST | `/api/v1/public/c/{public_token}/inscripciones` | Inscripcion a la edicion |
+
 ## Salud interna y pruebas bajo `/api`
 
 | Método | Ruta | Estado |

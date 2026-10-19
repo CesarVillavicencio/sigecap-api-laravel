@@ -315,10 +315,11 @@ class ApiCrudTest extends TestCase
         $this->get('/cursos')->assertOk()->assertSee('Cursos disponibles');
         $this->get('/cursos/'.$edition['course_id'])->assertOk()->assertSee('Confirmar inscripción');
         $this->get('/c/'.$edition['public_token'])->assertOk()->assertSee('Dependencia de prueba');
-        $coursePage = $this->getJson('/cursos/'.$edition['course_id'])->assertOk()->json('data');
+        $this->getJson('/api/v1/public/cursos')->assertOk()->assertJsonCount(1, 'data');
+        $coursePage = $this->getJson('/api/v1/public/cursos/'.$edition['course_id'])->assertOk()->json('data');
         $this->assertSame($edition['public_token'], $coursePage['editions'][0]['public_token']);
         $this->assertTrue($coursePage['editions'][0]['can_register']);
-        $json = $this->getJson('/c/'.$edition['public_token'])->assertOk()->json('data');
+        $json = $this->getJson('/api/v1/public/c/'.$edition['public_token'])->assertOk()->json('data');
         $this->assertArrayNotHasKey('created_by', $json['course']);
         $this->assertArrayNotHasKey('created_by', $json['editions'][0]);
         $data = [
@@ -349,7 +350,7 @@ class ApiCrudTest extends TestCase
         $this->post($url, ['first_name' => 'Ana'])->assertUnprocessable()->assertSee('No se pudo completar')->assertSee('value="Ana"', false);
         $this->post($url, array_replace($data, ['edition_id' => 999]))->assertUnprocessable();
         $this->assertDatabaseCount('participants', 0);
-        $this->postJson($url, $data)->assertCreated()->assertJsonPath('data.email', 'sent')->assertJsonStructure(['data' => ['folio', 'qr_svg']]);
+        $this->postJson('/api/v1/public'.$url, $data)->assertCreated()->assertJsonPath('data.email', 'sent')->assertJsonStructure(['data' => ['folio', 'qr_svg']]);
         Mail::assertSent(RegistrationConfirmationMail::class, 1);
         $second = $this->edition();
         $secondUrl = '/c/'.$second['public_token'].'/inscripciones';
