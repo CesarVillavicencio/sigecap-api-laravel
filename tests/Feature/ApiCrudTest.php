@@ -312,6 +312,9 @@ class ApiCrudTest extends TestCase
         $this->get('/cursos')->assertOk()->assertSee('Cursos disponibles');
         $this->get('/cursos/'.$edition['course_id'])->assertOk()->assertSee('Confirmar inscripción');
         $this->get('/c/'.$edition['public_token'])->assertOk()->assertSee('Dependencia de prueba');
+        $coursePage = $this->getJson('/cursos/'.$edition['course_id'])->assertOk()->json('data');
+        $this->assertSame($edition['public_token'], $coursePage['editions'][0]['public_token']);
+        $this->assertTrue($coursePage['editions'][0]['can_register']);
         $json = $this->getJson('/c/'.$edition['public_token'])->assertOk()->json('data');
         $this->assertArrayNotHasKey('created_by', $json['course']);
         $this->assertArrayNotHasKey('created_by', $json['editions'][0]);

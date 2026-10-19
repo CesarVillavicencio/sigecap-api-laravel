@@ -38,7 +38,7 @@ abstract class PublicCoursePageController extends Controller
         $data = [
             'course' => $course->only(['id', 'name', 'activity', 'description', 'objective', 'target_audience', 'duration_hours', 'modality']),
             'editions' => $editions->map(function ($item) {
-                return array_merge($item->only(['id', 'location', 'status', 'max_capacity']), [
+                return array_merge($item->only(['id', 'public_token', 'location', 'status', 'max_capacity']), [
                     'start_date' => $item->start_date->format('d/m/Y'),
                     'end_date' => $item->end_date?->format('d/m/Y'),
                     'start_time' => $item->start_time ? substr($item->start_time, 0, 5) : null,
