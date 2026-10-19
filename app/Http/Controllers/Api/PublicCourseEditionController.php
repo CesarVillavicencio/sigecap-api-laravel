@@ -2,31 +2,21 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Http\Controllers\Controller;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
-class PublicCourseEditionController extends Controller
+class PublicCourseEditionController extends PublicCoursePageController
 {
-    public function show(string $public_token): JsonResponse
+    public function show(Request $request, string $public_token)
     {
-        // TODO: Implementar esta operacion.
-        return response()->json([
-            'error' => [
-                'code' => 'NOT_IMPLEMENTED',
-                'message' => 'Operacion pendiente de implementar.',
-            ],
-        ], 501);
+        $edition = $this->edition($public_token);
+
+        return $this->page($request, $edition->course, $edition);
     }
 
-    public function register(Request $request, string $public_token): JsonResponse
+    public function register(Request $request, string $public_token)
     {
-        // TODO: Implementar esta operacion.
-        return response()->json([
-            'error' => [
-                'code' => 'NOT_IMPLEMENTED',
-                'message' => 'Operacion pendiente de implementar.',
-            ],
-        ], 501);
+        $edition = $this->edition($public_token);
+
+        return $this->submit($request, $edition->course, $edition);
     }
 }

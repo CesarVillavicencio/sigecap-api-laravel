@@ -4,14 +4,32 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\CourseEditionInstructor;
 use App\Models\CourseEditionModule;
+use App\Services\CertificatePdfService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class CourseEditionInstructorController extends CrudController
 {
     protected string $model = CourseEditionInstructor::class;
 
     protected array $filters = ['course_edition_id', 'instructor_id'];
+
+    public function pdf(string $id, CertificatePdfService $pdf): Response
+    {
+        $assignment = $this->find($id)->load(['instructor', 'module', 'courseEdition']);
+        $topic = $assignment->module?->name ?? $assignment->topic;
+        if (! is_string($topic) || trim($topic) === '') {
+            $this->fail('MODULE_REQUIRED', 'Asigna un modulo o tema al instructor antes de generar el reconocimiento.');
+        }
+        $date = $assignment->courseEdition->start_date->locale('es')->translatedFormat('j \\d\\e F \\d\\e Y');
+
+        return response($pdf->generate($assignment->instructor->name, $topic, $date), 200, [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'attachment; filename="reconocimiento-instructor-'.$assignment->id.'.pdf"',
+            'Cache-Control' => 'private, no-store',
+        ]);
+    }
 
     protected function rules(?Model $record): array
     {

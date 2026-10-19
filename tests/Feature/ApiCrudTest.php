@@ -4,8 +4,14 @@ namespace Tests\Feature;
 
 use App\Models\Attendance;
 use App\Models\Certificate;
+use App\Models\Participant;
+use App\Services\CertificatePdfService;
+use Endroid\QrCode\QrCode;
+use Endroid\QrCode\Writer\SvgWriter;
 use Illuminate\Support\Facades\DB;
 use PDO;
+use setasign\Fpdi\PdfParser\StreamReader;
+use setasign\Fpdi\Tfpdf\Fpdi;
 use Tests\Support\SqliteMigrationConnection;
 use Tests\TestCase;
 
@@ -247,6 +253,151 @@ class ApiCrudTest extends TestCase
         $this->getJson('/api/v1/dependencies?limit=101')->assertUnprocessable();
         $this->patchJson('/api/v1/dependencies/999', ['name' => 'Nada'])->assertNotFound();
         $this->deleteJson('/api/v1/dependencies/999')->assertNotFound();
+    }
+
+    public function test_instructor_pdf_uses_assignment_instructor_module_and_edition_date(): void
+    {
+        $edition = $this->edition(['start_date' => '2026-10-19']);
+        $module = $this->create('course-edition-modules', ['course_edition_id' => $edition['id'], 'name' => 'Educación financiera y ahorro']);
+        $instructor = $this->create('instructors', ['name' => 'Ana Sofía Pérez Muñoz']);
+        $assignment = $this->create('course-edition-instructors', [
+            'course_edition_id' => $edition['id'], 'instructor_id' => $instructor['id'],
+            'module_id' => $module['id'], 'topic' => 'Tema anterior',
+        ]);
+        $this->mock(CertificatePdfService::class, function ($mock) {
+            $mock->shouldReceive('generate')->once()
+                ->with('Ana Sofía Pérez Muñoz', 'Educación financiera y ahorro', '19 de octubre de 2026')
+                ->andReturn('%PDF-example');
+            $mock->shouldReceive('generate')->once()
+                ->with('Ana Sofía Pérez Muñoz', 'Tema anterior', '19 de octubre de 2026')
+                ->andReturn('%PDF-legacy');
+        });
+        $url = '/api/v1/course-edition-instructors/'.$assignment['id'].'/pdf';
+        $this->get($url)->assertOk()->assertHeader('Content-Type', 'application/pdf')
+            ->assertHeader('Content-Disposition', 'attachment; filename="reconocimiento-instructor-'.$assignment['id'].'.pdf"')
+            ->assertContent('%PDF-example');
+        $this->patchJson('/api/v1/course-edition-instructors/'.$assignment['id'], ['module_id' => null])->assertOk();
+        $this->get($url)->assertOk()->assertContent('%PDF-legacy');
+        $this->patchJson('/api/v1/course-edition-instructors/'.$assignment['id'], ['topic' => null])->assertOk();
+        $this->getJson($url)->assertConflict()->assertJsonPath('error.code', 'MODULE_REQUIRED');
+        $this->getJson('/api/v1/course-edition-instructors/999/pdf')->assertNotFound();
+    }
+
+    public function test_certificate_pdf_download_and_cancelled_registration(): void
+    {
+        $edition = $this->edition();
+        $registration = $this->registration($edition);
+        $this->create('attendances', ['registration_method' => 'manual', 'registration_id' => $registration['id']]);
+        $certificate = $this->create('certificates', ['registration_id' => $registration['id']]);
+        $participant = Participant::findOrFail($registration['participant_id']);
+        $participant->update(['first_name' => 'Ana Sofía', 'first_last_name' => 'Pérez', 'second_last_name' => 'Muñoz']);
+        $url = '/api/v1/certificates/'.$certificate['id'].'/pdf';
+        $response = $this->get($url)->assertOk()->assertHeader('Content-Type', 'application/pdf')
+            ->assertHeader('Content-Disposition', 'attachment; filename="reconocimiento-'.$certificate['id'].'.pdf"');
+        $this->assertStringStartsWith('%PDF-', $response->getContent());
+        $parser = new Fpdi;
+        $this->assertSame(1, $parser->setSourceFile(StreamReader::createByString($response->getContent())));
+        $size = $parser->getTemplateSize($parser->importPage(1));
+        $this->assertEqualsWithDelta(279.4, $size['width'], 0.1);
+        $this->assertEqualsWithDelta(215.9, $size['height'], 0.1);
+        $this->getJson('/api/v1/certificates/999/pdf')->assertNotFound();
+        $this->deleteJson('/api/v1/registrations/'.$registration['id'])->assertNoContent();
+        $this->getJson($url)->assertConflict()->assertJsonPath('error.code', 'REGISTRATION_CANCELLED');
+    }
+
+    public function test_public_pages_register_and_confirm_without_exposing_identity(): void
+    {
+        $edition = $this->edition();
+        $dependency = $this->create('dependencies', ['name' => 'Dependencia de prueba']);
+        $this->get('/cursos')->assertOk()->assertSee('Cursos disponibles');
+        $this->get('/cursos/'.$edition['course_id'])->assertOk()->assertSee('Confirmar inscripción');
+        $this->get('/c/'.$edition['public_token'])->assertOk()->assertSee('Dependencia de prueba');
+        $json = $this->getJson('/c/'.$edition['public_token'])->assertOk()->json('data');
+        $this->assertArrayNotHasKey('created_by', $json['course']);
+        $this->assertArrayNotHasKey('created_by', $json['editions'][0]);
+        $data = [
+            'dependency_id' => $dependency['id'], 'first_name' => 'Ana', 'first_last_name' => 'Perez',
+            'curp' => 'AAAA000101MBSXXX00', 'institutional_email' => 'ana@example.org',
+            'edition_id' => 999,
+        ];
+        $response = $this->post('/c/'.$edition['public_token'].'/inscripciones', $data)
+            ->assertCreated()->assertSee('Tu inscripción está confirmada')->assertSee('Descargar mi QR');
+        $this->assertStringContainsString('data:image/svg+xml;base64,', $response->getContent());
+        $this->assertDatabaseHas('registrations', ['course_edition_id' => $edition['id'], 'status' => 'registered']);
+        $this->post('/c/'.$edition['public_token'].'/inscripciones', $data)->assertConflict()->assertSee('Ya existe una inscripción');
+        $this->assertDatabaseCount('participants', 1);
+        $this->assertDatabaseCount('registrations', 1);
+    }
+
+    public function test_public_form_errors_closed_editions_and_existing_participants(): void
+    {
+        $edition = $this->edition();
+        $dependency = $this->create('dependencies', ['name' => 'Dependencia']);
+        $url = '/cursos/'.$edition['course_id'].'/inscripciones';
+        $data = [
+            'dependency_id' => $dependency['id'], 'first_name' => 'Ana', 'first_last_name' => 'Perez',
+            'curp' => 'AAAA000101MBSXXX00', 'institutional_email' => 'ana@example.org', 'edition_id' => $edition['id'],
+        ];
+        $this->post($url, ['first_name' => 'Ana'])->assertUnprocessable()->assertSee('No se pudo completar')->assertSee('value="Ana"', false);
+        $this->post($url, array_replace($data, ['edition_id' => 999]))->assertUnprocessable();
+        $this->assertDatabaseCount('participants', 0);
+        $this->postJson($url, $data)->assertCreated()->assertJsonPath('data.email', 'not_configured')->assertJsonStructure(['data' => ['folio', 'qr_svg']]);
+        $second = $this->edition();
+        $secondUrl = '/c/'.$second['public_token'].'/inscripciones';
+        $this->postJson($secondUrl, array_replace($data, ['institutional_email' => 'otro@example.org']))->assertConflict();
+        $this->postJson($secondUrl, array_replace($data, ['first_name' => 'Otro nombre']))->assertCreated();
+        $this->assertDatabaseHas('participants', ['curp' => $data['curp'], 'first_name' => 'Ana']);
+        $this->assertDatabaseCount('participants', 1);
+        $this->patchJson('/api/v1/course-editions/'.$edition['id'], ['status' => 'registration_closed'])->assertOk();
+        $this->get('/c/'.$edition['public_token'])->assertOk()->assertDontSee('Confirmar inscripción');
+        $this->postJson($url, array_replace($data, ['curp' => 'BBBB000101MBSXXX00']))->assertConflict();
+        $this->assertDatabaseCount('participants', 1);
+        $this->patchJson('/api/v1/course-editions/'.$edition['id'], ['status' => 'draft'])->assertOk();
+        $this->get('/c/'.$edition['public_token'])->assertNotFound();
+        $this->get('/cursos/'.$edition['course_id'])->assertNotFound();
+    }
+
+    public function test_qr_endpoints_encode_the_documented_urls_and_attendance_token(): void
+    {
+        config(['sigecap.public_base_url' => 'https://capacitacion.example.org/portal/']);
+        $edition = $this->edition();
+        $registration = $this->registration($edition);
+        $cases = [
+            ['courses', $edition['course_id'], 'https://capacitacion.example.org/portal/cursos/'.$edition['course_id'], 'curso'],
+            ['course-editions', $edition['id'], 'https://capacitacion.example.org/portal/c/'.$edition['public_token'], 'edicion'],
+            ['registrations', $registration['id'], $registration['qr_token'], 'inscripcion'],
+        ];
+        foreach ($cases as [$module, $id, $content, $filename]) {
+            $response = $this->get('/api/v1/'.$module.'/'.$id.'/qr.svg');
+            $response->assertOk()->assertHeader('Content-Type', 'image/svg+xml')
+                ->assertHeader('Content-Disposition', 'attachment; filename="'.$filename.'-'.$id.'.svg"');
+            $expected = (new SvgWriter)->write(
+                new QrCode(data: $content, size: 300, margin: 10)
+            )->getString();
+            $this->assertSame($expected, $response->getContent());
+            $this->assertSame('svg', simplexml_load_string($response->getContent())->getName());
+            $this->assertStringContainsString('no-store', $response->headers->get('Cache-Control'));
+        }
+        $this->assertDatabaseHas('course_editions', ['id' => $edition['id'], 'public_token' => $edition['public_token']]);
+        $this->assertDatabaseHas('registrations', ['id' => $registration['id'], 'qr_token' => $registration['qr_token']]);
+    }
+
+    public function test_public_qr_requires_configuration_but_attendance_qr_does_not(): void
+    {
+        $edition = $this->edition();
+        $registration = $this->registration($edition);
+        foreach ([null, '', 'invalid', 'javascript:alert(1)', 'https://example.org/?page=1', 'https://example.org/#section'] as $url) {
+            config(['sigecap.public_base_url' => $url]);
+            foreach (['courses' => $edition['course_id'], 'course-editions' => $edition['id']] as $module => $id) {
+                $this->getJson('/api/v1/'.$module.'/'.$id.'/qr.svg')->assertStatus(503)
+                    ->assertJsonPath('error.code', 'PUBLIC_BASE_URL_NOT_CONFIGURED');
+            }
+        }
+        config(['sigecap.public_base_url' => null]);
+        $this->get('/api/v1/registrations/'.$registration['id'].'/qr.svg')->assertOk();
+        foreach (['courses', 'course-editions', 'registrations'] as $module) {
+            $this->getJson('/api/v1/'.$module.'/999/qr.svg')->assertNotFound();
+        }
     }
 
     public function test_reassignments_keep_certificates_backed_by_attendance(): void

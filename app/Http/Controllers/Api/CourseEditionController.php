@@ -3,10 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\CourseEdition;
+use App\Services\QrCodeService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class CourseEditionController extends CrudController
 {
@@ -57,8 +58,10 @@ class CourseEditionController extends CrudController
         $record->delete();
     }
 
-    public function qr(string $id): JsonResponse
+    public function qr(string $id, QrCodeService $qr): Response
     {
-        $this->fail('NOT_IMPLEMENTED', 'La generacion del QR esta pendiente.', 501);
+        $edition = $this->find($id);
+
+        return $qr->download($qr->publicUrl('c/'.$edition->public_token), 'edicion-'.$edition->id.'.svg');
     }
 }

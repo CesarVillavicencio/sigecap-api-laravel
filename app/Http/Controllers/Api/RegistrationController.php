@@ -6,9 +6,10 @@ use App\Models\Course;
 use App\Models\CourseEdition;
 use App\Models\Participant;
 use App\Models\Registration;
+use App\Services\QrCodeService;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class RegistrationController extends CrudController
 {
@@ -82,8 +83,10 @@ class RegistrationController extends CrudController
         $record->update(['status' => 'cancelled']);
     }
 
-    public function qr(string $id): JsonResponse
+    public function qr(string $id, QrCodeService $qr): Response
     {
-        $this->fail('NOT_IMPLEMENTED', 'La generacion del QR esta pendiente.', 501);
+        $registration = $this->find($id);
+
+        return $qr->download($registration->qr_token, 'inscripcion-'.$registration->id.'.svg');
     }
 }

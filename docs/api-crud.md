@@ -45,4 +45,24 @@ No se permiten reasignaciones de inscripciones con asistencia o constancia, ni m
 
 `tests/Feature/ApiCrudTest.php` prueba los diez módulos sobre SQLite en memoria, utilizando las migraciones de negocio reales. El adaptador de pruebas omite exclusivamente los `ALTER TABLE ... ADD CONSTRAINT` específicos de PostgreSQL. Las pruebas verifican las reglas de la API, las claves foráneas y los índices; no comprueban los CHECK ni la concurrencia de PostgreSQL. No escriben en la base configurada del usuario.
 
-Las migraciones existentes contienen dos archivos que crean `users`; este cambio no los modifica ni ejecuta migraciones en la base actual. La generación de QR, las pantallas públicas, PDF, correo y autenticación siguen pendientes.
+Las migraciones existentes contienen dos archivos que crean `users`; este cambio no los modifica ni ejecuta migraciones en la base actual. Correo y autenticación siguen pendientes. La descarga `GET /api/v1/certificates/{id}/pdf` agrega el nombre a la plantilla de reconocimiento; ver [Reconocimientos PDF](reconocimientos-pdf.md).
+
+## Códigos QR
+
+Los siguientes GET generan y descargan SVG usando `endroid/qr-code`, sin guardar imágenes ni cambiar los tokens existentes:
+
+| Endpoint | Contenido del QR |
+| --- | --- |
+| `/api/v1/courses/{id}/qr.svg` | `${PUBLIC_BASE_URL}/cursos/{id}` |
+| `/api/v1/course-editions/{id}/qr.svg` | `${PUBLIC_BASE_URL}/c/{public_token}` |
+| `/api/v1/registrations/{id}/qr.svg` | El `qr_token` de la inscripción, sin URL. |
+
+Configura `PUBLIC_BASE_URL` en `.env` con el origen del frontend público, incluyendo puerto y subdirectorio si corresponden. Por ejemplo, `PUBLIC_BASE_URL=http://192.168.1.50:3000`. Usa la dirección real accesible desde el teléfono que escanea, no `0.0.0.0` ni `localhost`. Después de cambiarla, ejecuta `php artisan config:clear` si tienes configuración en caché.
+
+Los QR de curso y edición devuelven 503 si falta esa URL o es inválida. Los tres devuelven 404 si el registro no existe. Se envía `Content-Type: image/svg+xml`, descarga con nombre de archivo y `Cache-Control: private, no-store`.
+
+Las fichas públicas de prueba están disponibles en `/cursos`, `/cursos/{id}` y `/c/{public_token}`. Las vistas Blade están en `resources/views/public-courses`: `layout` contiene el estilo, `index` el catálogo, `show` la ficha y formulario, y `confirmation` el folio y QR descargable. No requieren compilar assets.
+
+Solo se muestran cursos activos con ediciones distintas de draft/cancelled. El formulario requiere una dependencia activa y una edición con inscripciones abiertas, periodo vigente y cupo. El registro es transaccional; reutiliza participantes únicamente si coinciden CURP, correo y dependencia, y no modifica su ficha. La edición de una URL con token se resuelve en el servidor.
+
+Los GET y POST admiten respuestas JSON con `Accept: application/json`. La confirmación HTML permite descargar el QR sin acceder a los endpoints administrativos. El correo no se envía en esta versión de prueba y se informa `email: not_configured`. La verificación pública de constancias y la protección con `X-API-Key` siguen pendientes.
