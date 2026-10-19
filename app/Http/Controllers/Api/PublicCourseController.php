@@ -9,10 +9,10 @@ class PublicCourseController extends PublicCoursePageController
 {
     public function index(Request $request)
     {
-        $courses = Course::where('active', true)
+        $courses = Course::with('editions')->where('active', true)
             ->whereHas('editions', fn ($q) => $q->whereNotIn('status', ['draft', 'cancelled']))
             ->orderBy('name')->get(['id', 'name', 'description', 'modality', 'duration_hours']);
-
+        
         return $request->expectsJson()
             ? response()->json(['data' => $courses])
             : response()->view('public-courses.index', compact('courses'));
