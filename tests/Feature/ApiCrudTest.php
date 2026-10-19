@@ -5,10 +5,12 @@ namespace Tests\Feature;
 use App\Models\Attendance;
 use App\Models\Certificate;
 use App\Models\Participant;
+use App\Mail\RegistrationConfirmationMail;
 use App\Services\CertificatePdfService;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\SvgWriter;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
 use PDO;
 use setasign\Fpdi\PdfParser\StreamReader;
 use setasign\Fpdi\Tfpdf\Fpdi;
@@ -307,6 +309,7 @@ class ApiCrudTest extends TestCase
 
     public function test_public_pages_register_and_confirm_without_exposing_identity(): void
     {
+        Mail::fake();
         $edition = $this->edition();
         $dependency = $this->create('dependencies', ['name' => 'Dependencia de prueba']);
         $this->get('/cursos')->assertOk()->assertSee('Cursos disponibles');
@@ -325,6 +328,7 @@ class ApiCrudTest extends TestCase
         ];
         $response = $this->post('/c/'.$edition['public_token'].'/inscripciones', $data)
             ->assertCreated()->assertSee('Tu inscripción está confirmada')->assertSee('Descargar mi QR');
+        Mail::assertSent(RegistrationConfirmationMail::class);
         $this->assertStringContainsString('data:image/svg+xml;base64,', $response->getContent());
         $this->assertDatabaseHas('registrations', ['course_edition_id' => $edition['id'], 'status' => 'registered']);
         $this->post('/c/'.$edition['public_token'].'/inscripciones', $data)->assertConflict()->assertSee('Ya existe una inscripción');
@@ -334,6 +338,7 @@ class ApiCrudTest extends TestCase
 
     public function test_public_form_errors_closed_editions_and_existing_participants(): void
     {
+        Mail::fake();
         $edition = $this->edition();
         $dependency = $this->create('dependencies', ['name' => 'Dependencia']);
         $url = '/cursos/'.$edition['course_id'].'/inscripciones';
@@ -344,7 +349,8 @@ class ApiCrudTest extends TestCase
         $this->post($url, ['first_name' => 'Ana'])->assertUnprocessable()->assertSee('No se pudo completar')->assertSee('value="Ana"', false);
         $this->post($url, array_replace($data, ['edition_id' => 999]))->assertUnprocessable();
         $this->assertDatabaseCount('participants', 0);
-        $this->postJson($url, $data)->assertCreated()->assertJsonPath('data.email', 'not_configured')->assertJsonStructure(['data' => ['folio', 'qr_svg']]);
+        $this->postJson($url, $data)->assertCreated()->assertJsonPath('data.email', 'sent')->assertJsonStructure(['data' => ['folio', 'qr_svg']]);
+        Mail::assertSent(RegistrationConfirmationMail::class, 1);
         $second = $this->edition();
         $secondUrl = '/c/'.$second['public_token'].'/inscripciones';
         $this->postJson($secondUrl, array_replace($data, ['institutional_email' => 'otro@example.org']))->assertConflict();

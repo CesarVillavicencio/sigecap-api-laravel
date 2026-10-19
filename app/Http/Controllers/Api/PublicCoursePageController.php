@@ -111,9 +111,6 @@ abstract class PublicCoursePageController extends Controller
         }
         $svg = app(QrCodeService::class)->download($registration->qr_token, 'qr.svg')->getContent();
         $confirmation = ['folio' => $registration->folio, 'qr_svg' => $svg, 'email' => 'not_configured'];
-        if ($request->expectsJson()) {
-            return response()->json(['data' => $confirmation], 201)->header('Cache-Control', 'private, no-store');
-        }
 
         //start ENVIO DE CORREO
         try {
@@ -137,6 +134,10 @@ abstract class PublicCoursePageController extends Controller
             $confirmation['email'] = 'failed';
         }
         // end ENVIO DE CORREO
+        if ($request->expectsJson()) {
+            return response()->json(['data' => $confirmation], 201)->header('Cache-Control', 'private, no-store');
+        }
+
         return response()->view('public-courses.confirmation', $confirmation + ['course' => $course], 201)
             ->header('Cache-Control', 'private, no-store');
     }
