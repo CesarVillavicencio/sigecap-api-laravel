@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use Database\Seeders\DemoAttendanceSeeder;
 use Database\Seeders\DemoTrainingSeeder;
 use Illuminate\Support\Facades\DB;
 use PDO;
@@ -48,5 +49,24 @@ class DemoTrainingSeederTest extends TestCase
         $this->assertSame(0, DB::table('course_edition_instructors as assignment')
             ->join('course_edition_modules as module', 'module.id', '=', 'assignment.module_id')
             ->whereColumn('assignment.course_edition_id', '!=', 'module.course_edition_id')->count());
+    }
+
+    public function test_it_creates_attendances_only_for_active_registrations_in_finished_demo_editions(): void
+    {
+        $this->seed(DemoAttendanceSeeder::class);
+        $this->seed(DemoAttendanceSeeder::class);
+
+        $this->assertDatabaseCount('attendances', 30);
+        foreach (['qr', 'folio', 'manual'] as $method) {
+            $this->assertSame(10, DB::table('attendances')->where('registration_method', $method)->count());
+        }
+        $this->assertSame(0, DB::table('attendances as attendance')
+            ->join('registrations as registration', 'registration.id', '=', 'attendance.registration_id')
+            ->join('course_editions as edition', 'edition.id', '=', 'registration.course_edition_id')
+            ->where(function ($query): void {
+                $query->where('registration.status', '!=', 'registered')
+                    ->orWhere('edition.status', '!=', 'finished')
+                    ->orWhereColumn('attendance.check_in_at', '<', 'registration.registered_at');
+            })->count());
     }
 }
