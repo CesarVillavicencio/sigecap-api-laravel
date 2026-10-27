@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\RegistrationController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', [RegistrationController::class, 'index'])->name('index');
+Route::get('/excel/{courseId}', [RegistrationController::class, 'byCourse'])->whereNumber('courseId')->name('by-course');
 Route::get('/{id}', [RegistrationController::class, 'show'])->whereNumber('id')->name('show');
 Route::post('/', [RegistrationController::class, 'store'])->name('store');
 Route::delete('/{id}', [RegistrationController::class, 'destroy'])->whereNumber('id')->name('destroy');

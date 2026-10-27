@@ -10,12 +10,76 @@ use App\Services\QrCodeService;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class RegistrationController extends CrudController
 {
     protected string $model = Registration::class;
 
     protected array $filters = ['participant_id', 'course_edition_id', 'status'];
+
+    public function byCourse(string $courseId): StreamedResponse
+    {
+        $course = Course::find($courseId);
+        if (! $course) {
+            $this->fail('NOT_FOUND', 'El curso no existe.', 404);
+        }
+
+        return response()->streamDownload(function () use ($courseId, $course) {
+            $spreadsheet = new Spreadsheet;
+            $sheet = $spreadsheet->getActiveSheet();
+            $sheet->setTitle('Registros');
+            $sheet->mergeCells('A1:D1');
+            $sheet->setCellValueExplicit('A1', $course->name, DataType::TYPE_STRING);
+            $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(16);
+            $sheet->fromArray([
+                'Folio', 'Estado', 'Nombre completo', 'Dependencia',
+            ], null, 'A3');
+
+            try {
+                $registrations = Registration::with('participant.dependency')
+                    ->whereHas('courseEdition', fn ($query) => $query->where('course_id', $courseId))
+                    ->lazyById(500);
+                $row = 4;
+                foreach ($registrations as $registration) {
+                    $participant = $registration->participant;
+                    $values = [
+                        $registration->folio,
+                        $registration->status,
+                        collect([
+                            $participant?->first_name,
+                            $participant?->first_last_name,
+                            $participant?->second_last_name,
+                        ])->filter()->implode(' '),
+                        $participant?->dependency?->name ?? $participant?->dependency_name ?? '',
+                    ];
+
+                    foreach ($values as $column => $value) {
+                        // Los datos capturados se escriben como texto, nunca como fórmulas.
+                        $sheet->setCellValueExplicit([$column + 1, $row], (string) $value, DataType::TYPE_STRING);
+                    }
+                    $row++;
+                }
+
+                $sheet->getStyle('A3:D3')->getFont()->setBold(true);
+                $sheet->freezePane('A4');
+                $sheet->setAutoFilter('A3:D'.($row - 1));
+                foreach (range('A', 'D') as $column) {
+                    $sheet->getColumnDimension($column)->setAutoSize(true);
+                }
+
+                (new Xlsx($spreadsheet))->save('php://output');
+            } finally {
+                $spreadsheet->disconnectWorksheets();
+            }
+        }, 'registros-curso-'.$courseId.'.xlsx', [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Cache-Control' => 'private, no-store',
+        ]);
+    }
 
     protected function rules(?Model $record): array
     {

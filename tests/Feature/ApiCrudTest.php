@@ -12,6 +12,7 @@ use Endroid\QrCode\Writer\SvgWriter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use PDO;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use setasign\Fpdi\PdfParser\StreamReader;
 use setasign\Fpdi\Tfpdf\Fpdi;
 use Tests\Support\SqliteMigrationConnection;
@@ -71,6 +72,65 @@ class ApiCrudTest extends TestCase
             'participant_id' => ($participant ?? $this->participant())['id'],
             'course_edition_id' => $edition['id'],
         ]);
+    }
+
+    public function test_course_registrations_download_as_excel(): void
+    {
+        $edition = $this->edition();
+        $participant = $this->participant();
+        Participant::findOrFail($participant['id'])->update([
+            'first_name' => 'María', 'second_last_name' => 'López',
+            'dependency_name' => '=1+1',
+        ]);
+        $this->registration($edition, $participant);
+        $secondEdition = $this->edition(['course_id' => $edition['course_id']]);
+        $dependency = $this->create('dependencies', ['name' => 'Educación & Cultura']);
+        $catalogParticipant = $this->participant('BBBB000101MBSXXX00');
+        Participant::findOrFail($catalogParticipant['id'])->update(['dependency_id' => $dependency['id']]);
+        $cancelled = $this->registration($secondEdition, $catalogParticipant);
+        $this->deleteJson('/api/v1/registrations/'.$cancelled['id'])->assertNoContent();
+        $otherEdition = $this->edition();
+        $this->registration($otherEdition, $participant);
+
+        $response = $this->get('/api/v1/registrations/excel/'.$edition['course_id']);
+        $response->assertOk()->assertDownload('registros-curso-'.$edition['course_id'].'.xlsx')
+            ->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+        $path = tempnam(sys_get_temp_dir(), 'registrations-test-');
+        try {
+            file_put_contents($path, $response->streamedContent());
+            $workbook = IOFactory::load($path);
+            $sheet = $workbook->getActiveSheet();
+            $this->assertSame(5, $sheet->getHighestRow());
+            $this->assertSame('D', $sheet->getHighestColumn());
+            $this->assertSame('Curso', $sheet->getCell('A1')->getValue());
+            $this->assertSame([['Folio', 'Estado', 'Nombre completo', 'Dependencia']], $sheet->rangeToArray('A3:D3'));
+            $this->assertSame('María Perez López', $sheet->getCell('C4')->getValue());
+            $this->assertSame('=1+1', $sheet->getCell('D4')->getValue());
+            $this->assertSame('s', $sheet->getCell('D4')->getDataType());
+            $this->assertSame('Educación & Cultura', $sheet->getCell('D5')->getValue());
+            $this->assertSame('cancelled', $sheet->getCell('B5')->getValue());
+            $workbook->disconnectWorksheets();
+        } finally {
+            unlink($path);
+        }
+    }
+
+    public function test_course_registrations_excel_handles_empty_and_missing_courses(): void
+    {
+        $this->getJson('/api/v1/registrations/excel/999999')->assertNotFound();
+        $course = $this->create('courses', ['name' => 'Sin registros']);
+        $response = $this->get('/api/v1/registrations/excel/'.$course['id']);
+        $response->assertOk()->assertDownload('registros-curso-'.$course['id'].'.xlsx');
+        $path = tempnam(sys_get_temp_dir(), 'registrations-test-');
+        try {
+            file_put_contents($path, $response->streamedContent());
+            $workbook = IOFactory::load($path);
+            $this->assertSame(3, $workbook->getActiveSheet()->getHighestRow());
+            $this->assertSame('Sin registros', $workbook->getActiveSheet()->getCell('A1')->getValue());
+            $workbook->disconnectWorksheets();
+        } finally {
+            unlink($path);
+        }
     }
 
     public function test_catalogs_create_update_and_deactivate_with_all_editable_fields(): void
