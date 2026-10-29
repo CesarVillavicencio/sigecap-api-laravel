@@ -35,4 +35,8 @@ return [
         ],
     ],
 
+    'sigecap' => [
+        'api_key' => env('SIGECAP_API_KEY'),
+    ],
+
 ];
